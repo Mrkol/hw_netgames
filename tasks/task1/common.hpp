@@ -31,6 +31,9 @@ struct Defer
   ~Defer() { f(); }
 };
 
+template<class F>
+Defer(F) -> Defer<F>;
+
 // Using FILE* is a bad idea, as that is buffered
 class File
 {

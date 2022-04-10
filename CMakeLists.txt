@@ -51,5 +51,24 @@ endif()
 
 
 
+
+CPMAddPackage(
+  NAME enet
+  GITHUB_REPOSITORY lsalzman/enet
+  GIT_TAG v1.3.17
+)
+
+CPMAddPackage(
+    NAME spdlog
+    GITHUB_REPOSITORY gabime/spdlog
+    VERSION 1.9.2
+)
+
+CPMAddPackage(
+    GITHUB_REPOSITORY Naios/function2
+    GIT_TAG 4.2.0
+)
+
+
 add_subdirectory("tasks")
 
