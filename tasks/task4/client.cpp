@@ -381,7 +381,7 @@ class ClientService
 
               glm::vec2 compensation =
                 (playerServerPredicted->pos - entity.pos) * delta;
-              if (glm::length(compensation) > 1e-3)
+              if (glm::length(compensation) > entity.size/100.f)
               {
                 entity.pos += compensation;
                 playerServerPredicted->pos -= compensation;
