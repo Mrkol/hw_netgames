@@ -71,6 +71,12 @@ CPMAddPackage(
   )
 
 CPMAddPackage(
+    NAME glm
+    GITHUB_REPOSITORY g-truc/glm
+    GIT_TAG master # no releases for 2 years????
+  )
+
+CPMAddPackage(
     NAME allegro
     GITHUB_REPOSITORY liballeg/allegro5
     GIT_TAG 5.2.7.0
