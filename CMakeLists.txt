@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.20)
 
 project(netgames)
 
@@ -42,69 +42,20 @@ set(CPM_USE_LOCAL_PACKAGES True)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-set(CMAKE_CXX_FLAGS "-Werror -Wall -Wextra")
+
+if (MSVC)
+    add_compile_options(/W4 /WX)
+else()
+    add_compile_options(-Wall -Wextra)
+endif()
+
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -v")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
+    add_compile_options(-stdlib=libc++)
+    add_link_options(-stdlib=libc++ -lc++abi)
 endif()
 
-
-
-
-CPMAddPackage(
-  NAME enet
-  GITHUB_REPOSITORY lsalzman/enet
-  GIT_TAG v1.3.17
-  )
-
-CPMAddPackage(
-    NAME spdlog
-    GITHUB_REPOSITORY gabime/spdlog
-    VERSION 1.9.2
-  )
-
-CPMAddPackage(
-    NAME function2
-    GITHUB_REPOSITORY Naios/function2
-    GIT_TAG 4.2.0
-  )
-
-CPMAddPackage(
-    NAME glm
-    GITHUB_REPOSITORY g-truc/glm
-    GIT_TAG master # no releases for 2 years????
-  )
-
-CPMAddPackage(
-    NAME allegro
-    GITHUB_REPOSITORY liballeg/allegro5
-    GIT_TAG 5.2.7.0
-    OPTIONS
-      # Ah, yes, I want my build process to take 10 minutes by default, thank you!
-      "WANT_DOCS off"
-      "WANT_EXAMPLES off"
-      "WANT_DEMO off"
-      "WANT_TESTS off"
-      "WANT_VIDEO off"
-      "WANT_PHYSFS off"
-      "WANT_IMAGE_WEBP off"
-      "WANT_AUDIO off"
-  )
-
-if(allegro_ADDED)
-  # allegro's authors have no idea how to write proper cmake files
-  target_include_directories(allegro INTERFACE
-      "${allegro_SOURCE_DIR}/include"
-      "${allegro_BINARY_DIR}/include"
-    )
-
-  foreach(ADDON font image color primitives)
-    target_include_directories("allegro_${ADDON}" INTERFACE
-        "${allegro_SOURCE_DIR}/addons/${ADDON}"
-      )
-  endforeach()
-endif()
+include(thirdparty.cmake)
 
 
 add_subdirectory("tasks")
