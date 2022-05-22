@@ -12,6 +12,9 @@ enum class PacketType : uint8_t
   LobbyStarted,
   RegisterClientInLobby,
   RegisterServerInLobby,
+
+  SendKey,
+
   PlayerJoined,
   PlayerLeft,
   Chat,
@@ -69,3 +72,7 @@ PROTO_IMPL_PACKET(Chat)
   uint32_t player;
   std::array<char, 1000> message;
 };
+
+using XorKey = std::array<char, 4>;
+
+PROTO_IMPL_PACKET(SendKey) { XorKey key; };

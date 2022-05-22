@@ -4,16 +4,24 @@
 #include "../common/proto.hpp"
 
 
+enum class EntityField : uint32_t
+{
+  // no reflection :(
+  // each is 64 bits
+  Pos, SizeColor
+};
+
 struct EntityDelta {
   uint32_t id;
-  // packed
-  glm::uint deltaPos;
+  EntityField field;
+  uint64_t value;
 };
 
 PROTO_IMPL_PACKET(SnapshotDelta)
 {
   using Continuation = EntityDelta;
   uint64_t sequence;
+  uint64_t __padding;
 };
 
 PROTO_IMPL_PACKET(Snapshot)
@@ -40,16 +48,3 @@ PROTO_IMPL_PACKET(SpawnEntity)
 PROTO_IMPL_PACKET(DestroyEntity) { uint32_t id; };
 
 PROTO_IMPL_PACKET(PossesEntity) { uint32_t id; };
-
-PROTO_IMPL_PACKET(EntityPropsChanged)
-{
-    uint32_t id;
-    float size;
-    uint32_t color;
-};
-
-PROTO_IMPL_PACKET(EntityTeleport)
-{
-    uint32_t id;
-    glm::vec2 pos;
-};

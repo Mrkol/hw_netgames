@@ -42,7 +42,7 @@ class Service
   {
     static_assert(!requires { typename Packet<t>::Continuation; },
       "Missing continuation argument in send!");
-    enet_peer_send(peer, channel,
+    peer_send(peer, channel,
       enet_packet_create(&packet, sizeof(packet), flag));
   }
 
@@ -55,7 +55,7 @@ class Service
     size_t contSizeBytes = sizeof(Cont)*cont.size();
     auto enetpacket = enet_packet_create(&packet, sizeof(packet) + contSizeBytes, flag);
     std::memcpy(enetpacket->data + sizeof(packet), cont.data(), contSizeBytes);
-    enet_peer_send(peer, channel, enetpacket);
+    peer_send(peer, channel, enetpacket);
   }
 
   template<PacketType t>
@@ -95,6 +95,7 @@ class Service
           break;
 
         case ENET_EVENT_TYPE_DISCONNECT:
+          keys.erase(event.peer);
           if (auto it = pending_disconnect_.find(event.peer);
             it != pending_disconnect_.end())
           {
@@ -109,10 +110,12 @@ class Service
 
         case ENET_EVENT_TYPE_RECEIVE:
           {
+            cipher(event.peer, event.packet);
             ENetPeer* peer = event.peer;
             uint8_t* data = event.packet->data;
             
             auto type = *reinterpret_cast<PacketType*>(event.packet->data);
+
             NG_VERIFY(static_cast<int>(type) < static_cast<int>(PacketType::COUNT));
             
             auto procPacketType =
@@ -170,12 +173,39 @@ class Service
     }
   }
 
+  void setKeyFor(ENetPeer* peer, const XorKey& key)
+  {
+    keys[peer] = key;
+  }
+
  private:
   Derived& self() { return *static_cast<Derived*>(this); }
   const Derived& self() const { return *static_cast<const Derived*>(this); }
+
+  void cipher(ENetPeer* peer, ENetPacket* packet) const
+  {
+    auto it = keys.find(peer);
+    if (it == keys.end()) return;
+
+    auto& key = it->second;
+
+    size_t j = 0;
+    for (size_t i = 0; i < packet->dataLength; ++i)
+    {
+      *packet->data ^= key[j++];
+      if (j == key.size()) j = 0;
+    }
+  }
   
+  void peer_send(ENetPeer* peer, enet_uint8 channelID, ENetPacket* packet) const
+  {
+    cipher(peer, packet);
+    enet_peer_send(peer, channelID, packet);
+  }
+
  private:
   UniquePtr<ENetHost> host_;
+  std::unordered_map<ENetPeer*, XorKey> keys;
   std::unordered_map<ENetPeer*, fu2::function<void(ENetPeer*)>> pending_connect_;
   std::unordered_map<ENetPeer*, fu2::function<void()>> pending_disconnect_;
 };

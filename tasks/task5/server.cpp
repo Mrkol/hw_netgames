@@ -82,6 +82,12 @@ class ServerService
   {
     spdlog::info("{}:{} joined", peer->address.host, peer->address.port);
 
+    send(peer, 0, ENET_PACKET_FLAG_RELIABLE, PSendKey{
+      .key = TOP_SECRET_KEY,
+    });
+
+    setKeyFor(peer, TOP_SECRET_KEY);
+
     auto id = idCounter_++;
 
     auto& newState = stateHistory_.emplace_front(stateHistory_.front());
@@ -196,27 +202,6 @@ class ServerService
     }
   }
 
-  void broadcastEntityChange(const Entity& entity, bool teleport)
-  {
-    for (auto&[client, _] : clients_)
-    {
-      send(client, 0, ENET_PACKET_FLAG_RELIABLE,
-        PEntityPropsChanged{
-          .id = entity.id,
-          .size = entity.size,
-          .color = entity.color,
-        });
-      if (teleport)
-      {
-        send(client, 0, ENET_PACKET_FLAG_RELIABLE,
-          PEntityTeleport{
-            .id = entity.id,
-            .pos = entity.pos,
-          });
-      }
-    }
-  }
-
   void updateLogic(float delta)
   {
     auto& newState = stateHistory_.emplace_front(stateHistory_.front());
@@ -253,9 +238,6 @@ class ServerService
           e1.size /= 2;
 
           e1.pos = Entity::randomPos();
-
-          broadcastEntityChange(e1, true);
-          broadcastEntityChange(e2, false);
         }
       }
     }
@@ -309,15 +291,26 @@ class ServerService
         std::span(oldEntities.data(), oldEntities.size()),
         [&deltas](const Entity& n, const Entity o)
         {
-          auto delta_pos = n.pos - o.pos;
-
-          if (glm::length(delta_pos) < 1e-3) return;
-
-          deltas.emplace_back(
-            EntityDelta {
-              .id = n.id,
-              .deltaPos = glm::packHalf2x16(delta_pos),
-            });
+          if (glm::length(n.pos - o.pos) > 1e-3)
+          {
+            deltas.emplace_back(
+              EntityDelta {
+                .id = n.id,
+                .field = EntityField::Pos,
+                .value = std::bit_cast<uint64_t>(n.pos),
+              });
+          }
+          
+          if (glm::abs(n.size - o.size) > 1e-3 || n.color != o.color)
+          {
+            deltas.emplace_back(
+              EntityDelta {
+                .id = n.id,
+                .field = EntityField::SizeColor,
+                .value = static_cast<uint64_t>(std::bit_cast<uint32_t>(n.size)) << 32
+                  | static_cast<uint64_t>(n.color),
+              });
+          }
         });
 
       send(to, 1, {}, PSnapshotDelta{ .sequence = currentSequence },
@@ -373,6 +366,7 @@ class ServerService
   std::unordered_map<ENetPeer*, ClientData> clients_;
   uint32_t idCounter_{1};
 
+  constexpr static XorKey TOP_SECRET_KEY { '\xDE', '\xAD', '\xBE', '\xEF' };
 };
 
 int main(int argc, char** argv)

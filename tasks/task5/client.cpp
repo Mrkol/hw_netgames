@@ -66,6 +66,11 @@ class ClientService
     return &*it;
   }
 
+  void handlePacket(ENetPeer* peer, const PSendKey& packet)
+  {
+    setKeyFor(peer, packet.key);    
+  }
+
   void handlePacket(ENetPeer*, const PChat& packet)
   {
     std::string line{packet.message.data()};
@@ -119,7 +124,15 @@ class ClientService
       cont,
       [](Entity& entity, const EntityDelta& delta)
       {
-        entity.pos += glm::unpackHalf2x16(delta.deltaPos);
+        if (delta.field == EntityField::Pos)
+        {
+          entity.pos = std::bit_cast<glm::vec2>(delta.value);
+        }
+        else if (delta.field == EntityField::SizeColor)
+        {
+          entity.size = std::bit_cast<float>(static_cast<uint32_t>(delta.value >> 32));
+          entity.color = static_cast<uint32_t>(delta.value);
+        }
       });
 
     if (snapshotHistory_.size() > 10)
@@ -127,7 +140,7 @@ class ClientService
       snapshotHistory_.pop_front();
     }
 
-    send(server_peer_, 0, ENET_PACKET_FLAG_RELIABLE,
+    send(server_peer_, 1, {},
       PSnapshotDeltaAck{ .sequence = packet.sequence });
   }
 
@@ -135,35 +148,6 @@ class ClientService
   {
     state_.entities.emplace_back(packet.entity);
     snapshotHistory_.back().state.entities.emplace_back(packet.entity);
-  }
-
-  void handlePacket(ENetPeer*, const PEntityPropsChanged& packet)
-  {
-    if (auto e = entityById(packet.id))
-    {
-      e->size = packet.size;
-      e->color = packet.color;
-    }
-  }
-
-  void handlePacket(ENetPeer*, const PEntityTeleport& packet)
-  {
-    if (auto e = entityById(packet.id))
-    {
-      e->pos = packet.pos;
-    }
-
-    // history is useless if we teleported
-    for (auto& snapshot : snapshotHistory_) {
-      auto it = std::find_if(snapshot.state.entities.begin(), snapshot.state.entities.end(),
-        [&packet](const Entity& e) { return e.id == packet.id; });
-      if (it == snapshot.state.entities.end()) {
-        continue;
-      }
-
-      std::swap(*it, snapshot.state.entities.back());
-      snapshot.state.entities.pop_back();
-    }
   }
 
   void handlePacket(ENetPeer*, const PDestroyEntity& packet)
@@ -362,7 +346,12 @@ class ClientService
           auto h = durationToSecs(time - to)
             / durationToSecs(tr - to);
           
-          result.emplace_back(Entity{ .pos = r.pos*h + (1 - h)*o.pos, .id = r.id, });
+          result.emplace_back(Entity{
+              .pos = r.pos*h + (1 - h)*o.pos,
+              .size = r.size*h + (1 - h)*o.size,
+              .color = r.color,
+              .id = r.id,
+            });
         });
 
       return result;
@@ -461,6 +450,8 @@ class ClientService
           std::span{interpolated.data(), interpolated.size()},
           [this](Entity& e, Entity& interp)
           {
+            e.size = interp.size;
+            e.color = interp.color;
             if (e.id == playerEntityId_) {
               return;
             }
@@ -472,13 +463,17 @@ class ClientService
 
       if (server_peer_ != nullptr
         && playerEntityId_ != kInvalidId
-        && (now - lastSendTime) > kSendRate
-        && glm::length(playerDesiredSpeed_) > 1e-3)
+        && (now - lastSendTime) > kSendRate)
       {
-        lastSendTime = now;
-        send(server_peer_, 1, {}, PPlayerInput{
-            .desiredSpeed = glm::packSnorm2x16(playerDesiredSpeed_)
-          });
+        auto sz = playerVelHistory_.size();
+        if (sz < 2
+          || glm::length(playerVelHistory_[sz - 1].vel - playerVelHistory_[sz - 2].vel) > 1e-3)
+        {
+          lastSendTime = now;
+          send(server_peer_, 1, {}, PPlayerInput{
+              .desiredSpeed = glm::packSnorm2x16(playerDesiredSpeed_)
+            });
+        }
       }
     }
 

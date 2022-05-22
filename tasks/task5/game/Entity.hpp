@@ -60,7 +60,6 @@ void zipById(std::span<T> first, std::span<U> second, F f)
     }
 
     f(first[i], second[j]);
-    ++i;
     ++j;
   }
 }
