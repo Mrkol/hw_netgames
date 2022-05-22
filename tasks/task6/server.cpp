@@ -25,21 +25,18 @@ class ServerService
   ServerService(ENetAddress addr)
     : Service(&addr, 32, 2)
   {
-    resetGame();
   }
 
-  void resetGame()
+  void resetGame(size_t bots)
   {
-    constexpr size_t kBots = 10;
-
     stateHistory_.clear();
     botTargets_.clear();
 
     auto& initial = stateHistory_.emplace_back();
     initial.sequence = 0;
-    initial.entities.reserve(kBots);
-    botTargets_.reserve(kBots);
-    for (size_t i = 0; i < kBots; ++i)
+    initial.entities.reserve(bots);
+    botTargets_.reserve(bots);
+    for (size_t i = 0; i < bots; ++i)
     {
       auto entity = Entity::create();
       auto id = initial.entities.emplace_back(entity).id;
@@ -63,8 +60,12 @@ class ServerService
         NG_VERIFY(lobby != nullptr);
         send(lobby, 0, ENET_PACKET_FLAG_RELIABLE,
           PRegisterServerInLobby{});
-        disconnect(lobby, [](){});
       });
+  }
+
+  void handlePacket(ENetPeer* peer, const PStartServerGame& packet)
+  {
+    resetGame(packet.botCount);
   }
 
   void handlePacket(ENetPeer* peer, PChat packet)
@@ -197,7 +198,8 @@ class ServerService
     if (clients_.empty())
     {
       spdlog::info("All players left, requeueing in lobby");
-      resetGame();
+      stateHistory_.clear();
+      botTargets_.clear();
       registerInLobby(nullptr, 0);
     }
   }

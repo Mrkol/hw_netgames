@@ -18,7 +18,7 @@ enum class PacketType : uint8_t
   JoinLobby,
   JoinedLobby,
   LeaveLobby,
-
+  StartServerGame,
 
   SendKey,
 
@@ -55,11 +55,13 @@ struct Packet<PacketType::Name> : PacketBase<PacketType::Name>
 
 
 PROTO_IMPL_PACKET(StartLobby) { uint32_t id; };
+PROTO_IMPL_PACKET(StartServerGame) { uint32_t botCount; };
 
 
 PROTO_IMPL_PACKET(CreateLobby)
 {
   std::array<char, 128> name;
+  uint32_t botCount;
 };
 PROTO_IMPL_PACKET(JoinLobby) { uint32_t id; };
 PROTO_IMPL_PACKET(JoinedLobby) { uint32_t id; };
@@ -70,6 +72,7 @@ struct LobbyEntry
   std::array<char, 128> name;
   uint32_t id;
   uint32_t playerCount;
+  uint32_t botCount;
 };
 
 PROTO_IMPL_PACKET(LobbyListUpdate)

@@ -261,13 +261,20 @@ class ClientService
     {
       ImGui::Begin("Lobby browser");
       {
-        static std::array<char, 128> lobbyName;
-        ImGui::InputText("Lobby name", lobbyName.data(), lobbyName.size());
+        static std::array<char, 128> lobbyName{0};
+        ImGui::InputTextWithHint("##lobbyname", "Lobby name", lobbyName.data(), lobbyName.size() - 1);
         ImGui::SameLine();
-        if (ImGui::Button("Create"))
+        static int botCount = 10;
+        ImGui::InputInt("Bots", &botCount);
+        if (botCount > 50) botCount = 50;
+        if (botCount < 0) botCount = 0;
+
+        if (ImGui::Button("Create lobby")
+          && std::strlen(lobbyName.data()) > 0)
         {
           send(lobby_peer_, 0, ENET_PACKET_FLAG_RELIABLE, PCreateLobby{
             .name = lobbyName,
+            .botCount = static_cast<uint32_t>(botCount),
           });
         }
       }

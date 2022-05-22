@@ -16,6 +16,7 @@ using namespace std::chrono_literals;
 struct Lobby
 {
   std::string name;
+  uint32_t botCount;
   std::vector<ENetPeer*> players;
 };
 
@@ -90,6 +91,7 @@ class LobbyService
 
     auto lobby = lobbies_.emplace(lobbyIdCounter_++, Lobby{
       .name = std::string(packet.name.data(), packet.name.size()),
+      .botCount = packet.botCount,
       .players = {peer},
     }).first;
     spdlog::info("Creating lobby {}", lobby->second.name);
@@ -141,9 +143,6 @@ class LobbyService
       return;
     }
 
-    auto server = servers_.front();
-    servers_.pop_front();
-
     auto it = lobbies_.find(packet.id);
     if (it == lobbies_.end())
     {
@@ -154,14 +153,21 @@ class LobbyService
     Lobby lobby = std::move(it->second);
     lobbies_.erase(it);
 
+
+    auto server = servers_.back();
+    servers_.pop_back();
+
+    send(server, 0, ENET_PACKET_FLAG_RELIABLE, PStartServerGame{ .botCount = lobby.botCount });
+    disconnect(server, [](){});
+
     spdlog::info("Sending {} clients from lobby {} (id {}) to server {}:{}!",
-      lobby.players.size(), lobby.name, packet.id, server.host, server.port);
+      lobby.players.size(), lobby.name, packet.id, server->address.host, server->address.port);
 
     for (auto peer : lobby.players)
     {
       send(peer, 0, ENET_PACKET_FLAG_RELIABLE,
         PLobbyStarted{
-          .serverAddress = server,
+          .serverAddress = server->address,
         });
     }
   }
@@ -180,14 +186,20 @@ class LobbyService
   void handlePacket(ENetPeer* server, const PRegisterServerInLobby&)
   {
     spdlog::info("Server {}:{} registered", server->address.host, server->address.port);
-    servers_.push_back(server->address);
+    servers_.push_back(server);
   }
 
   void disconnected(ENetPeer* peer)
   {
-    clients_.erase(peer);
-
-    removeFromLobby(peer);
+    if (clients_.erase(peer) > 0)
+    {
+      removeFromLobby(peer);
+    }
+    else if (auto it = std::find(servers_.begin(), servers_.end(), peer); it != servers_.end())
+    {
+      std::swap(*it, servers_.back());
+      servers_.pop_back();
+    }
   }
 
   void run()
@@ -206,7 +218,7 @@ class LobbyService
 
  private:
   std::unordered_set<ENetPeer*> clients_;
-  std::deque<ENetAddress> servers_;
+  std::vector<ENetPeer*> servers_;
 
   std::unordered_map<uint32_t, Lobby> lobbies_;
   uint32_t lobbyIdCounter_{0};
