@@ -290,6 +290,8 @@ class ClientService
         }
         ImGui::SameLine();
         ImGui::Text("P: %d", entry.playerCount);
+        ImGui::SameLine();
+        ImGui::Text("B: %d", entry.botCount);
         if (currentLobbyId_.has_value() && currentLobbyId_.value() == entry.id)
         {
           ImGui::SameLine();

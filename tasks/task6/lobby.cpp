@@ -41,6 +41,7 @@ class LobbyService
           .name = {0},
           .id = id,
           .playerCount = static_cast<uint32_t>(lobby.players.size()),
+          .botCount = lobby.botCount,
         }).name;
       std::strncpy(name.data(), lobby.name.c_str(), name.size() - 1);
     }
