@@ -6,7 +6,15 @@ CPMAddPackage(
     GITHUB_REPOSITORY lsalzman/enet
     GIT_TAG v1.3.17
 )
-  
+
+
+if(enet_ADDED)
+    if (MSVC)
+        target_include_directories(enet PUBLIC "${enet_SOURCE_DIR}/include")
+        target_link_libraries(enet wsock32 ws2_32 winmm)
+    endif ()
+endif ()
+
 CPMAddPackage(
     NAME spdlog
     GITHUB_REPOSITORY gabime/spdlog
@@ -54,6 +62,24 @@ if(allegro_ADDED)
             "${allegro_SOURCE_DIR}/addons/${ADDON}"
         )
     endforeach()
+
+    function(copy_allegro_dlls tgt)
+        if (WIN32)
+          string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_TOLOWER)
+          foreach(ADDON "" "_font" "_primitives")
+            set(LIBNAME "allegro${ADDON}")
+            if(CMAKE_BUILD_TYPE_TOLOWER STREQUAL "debug")
+              set(${LIBNAME} "${${LIBNAME}}-debug")
+            endif()
+            add_custom_command(TARGET ${tgt}
+                POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_BINARY_DIR}\\_deps\\allegro-build\\${LIBNAME}-5.2.dll"
+                    "${CMAKE_BINARY_DIR}\\${LIBNAME}-5.2.dll"
+                )
+          endforeach()
+        endif()
+    endfunction()
 endif()
 
 

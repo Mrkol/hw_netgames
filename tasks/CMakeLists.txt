@@ -7,3 +7,5 @@ foreach(task_folder ${task_folders})
         add_subdirectory(${task_folder})
     endif()
 endforeach()
+
+

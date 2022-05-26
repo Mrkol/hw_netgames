@@ -4,7 +4,16 @@
 #include <enet/enet.h>
 #include <function2/function2.hpp>
 
+#include "common.hpp"
 #include "proto.hpp"
+
+// Fuck windows :)
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
 
 
 template<class Derived, bool IS_SERVER = false>
