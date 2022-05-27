@@ -68,14 +68,14 @@ if(allegro_ADDED)
           string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_TOLOWER)
           foreach(ADDON "" "_font" "_primitives")
             set(LIBNAME "allegro${ADDON}")
-            if(CMAKE_BUILD_TYPE_TOLOWER STREQUAL "debug")
-              set(${LIBNAME} "${${LIBNAME}}-debug")
+            if(${CMAKE_BUILD_TYPE_TOLOWER} STREQUAL "debug")
+              set(LIBNAME "${LIBNAME}-debug")
             endif()
             add_custom_command(TARGET ${tgt}
                 POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CMAKE_BINARY_DIR}\\_deps\\allegro-build\\${LIBNAME}-5.2.dll"
-                    "${CMAKE_BINARY_DIR}\\${LIBNAME}-5.2.dll"
+                    "${CMAKE_BINARY_DIR}/_deps/allegro-build/lib/${LIBNAME}-5.2.dll"
+                     $<TARGET_FILE_DIR:${tgt}>
                 )
           endforeach()
         endif()
