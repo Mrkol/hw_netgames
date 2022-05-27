@@ -9,10 +9,8 @@ CPMAddPackage(
 
 
 if(enet_ADDED)
-    if (MSVC)
-        target_include_directories(enet PUBLIC "${enet_SOURCE_DIR}/include")
-        target_link_libraries(enet wsock32 ws2_32 winmm)
-    endif ()
+    target_include_directories(enet PUBLIC "${enet_SOURCE_DIR}/include")
+    target_link_libraries(enet wsock32 ws2_32 winmm)
 endif ()
 
 CPMAddPackage(

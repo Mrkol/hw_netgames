@@ -7,6 +7,7 @@
 #include "common/Service.hpp"
 #include "common/AsyncInput.hpp"
 #include "common/Allegro.hpp"
+#include "common/Replication.hpp"
 #include "common/proto.hpp"
 
 #include "game/Entity.hpp"
@@ -28,10 +29,11 @@ ALLEGRO_COLOR colorToAllegro(uint32_t color)
 }
 
 
-class ClientService
-  : public Service<ClientService>
-  , public AsyncInput<ClientService>
-  , public Allegro<ClientService>
+class Client
+  : public Service<Client>
+  , public Replication<Client>
+  , public AsyncInput<Client>
+  , public Allegro<Client>
 {
   using Clock = std::chrono::steady_clock;
 
@@ -48,7 +50,7 @@ class ClientService
   };
 
  public:
-  ClientService()
+  Client()
     : Service(nullptr, 2, 2)
   {
     
@@ -56,108 +58,69 @@ class ClientService
 
   Entity* entityById(id_t id)
   {
-    auto it = std::find_if(state_.entities.begin(), state_.entities.end(),
+    auto it = std::find_if(state_.begin(), state_.end(),
       [id](const Entity& e) { return e.id == id; });
-    if (it == state_.entities.end())
+    if (it == state_.end())
       return nullptr;
     
     return &*it;
   }
+  
+  using Replication::handlePacket;
 
-  void handlePacket(ENetPeer* peer, const PSendKey& packet)
+  void handlePacket(ENetPeer* peer, enet_uint8, const PSendKey& packet)
   {
-    setKeyFor(peer, packet.key);    
+    setKeyFor(peer, packet.key);
   }
 
-  void handlePacket(ENetPeer*, const PChat& packet)
+  void handlePacket(ENetPeer*, enet_uint8, const PChat& packet)
   {
     std::string line{packet.message.data()};
     std::cout << packet.player << ": " << line << std::endl;
   }
 
-  void handlePacket(ENetPeer*, const PPlayerJoined& packet)
+  void handlePacket(ENetPeer*, enet_uint8, const PPlayerJoined& packet)
   {
     otherIds_.emplace(packet.id);
   }
 
-  void handlePacket(ENetPeer*, const PPlayerLeft& packet)
+  void handlePacket(ENetPeer*, enet_uint8, const PPlayerLeft& packet)
   {
     otherIds_.erase(packet.id);
   }
 
-  void handlePacket(ENetPeer*, const PPossesEntity& packet)
+  void handlePacket(ENetPeer*, enet_uint8, const PPossesEntity& packet)
   {
     playerEntityId_ = packet.id;
   }
 
-  void handlePacket(ENetPeer*, const PLobbyStarted& packet)
+  void handlePacket(ENetPeer*, enet_uint8, const PLobbyStarted& packet)
   {
     disconnect(std::exchange(lobby_peer_, nullptr), []() {});
     connect(packet.serverAddress,
       [this](ENetPeer* server)
       {
         NG_VERIFY(server != nullptr);
+        setupReplication(server, 1);
+        snapshotHistory_.emplace_back(Snapshot{ .time = Clock::now() });
         server_peer_ = server;
       });
   }
 
-  void handlePacket(ENetPeer*, const PSnapshot&, std::span<Entity> cont)
-  {
-    state_.entities.assign(cont.begin(), cont.end());
-    snapshotHistory_.emplace_back(Snapshot{
-      .state = GameState {
-        .sequence = 0,
-        .entities = std::vector(cont.begin(), cont.end()),
-      },
-      .time = Clock::now(),
-    });
-  }
-
-  void handlePacket(ENetPeer*, const PSnapshotDelta& packet, std::span<EntityDelta> cont)
+  void handleReplication(ENetPeer*, enet_uint8, std::span<std::byte> bytes)
   {
     auto& newSnapshot = snapshotHistory_.emplace_back(snapshotHistory_.back());
     newSnapshot.time = Clock::now();
-    zipById(
-      std::span(newSnapshot.state.entities.data(), newSnapshot.state.entities.size()),
-      cont,
-      [](Entity& entity, const EntityDelta& delta)
-      {
-        if (delta.field == EntityField::Pos)
-        {
-          entity.pos = std::bit_cast<glm::vec2>(delta.value);
-        }
-        else if (delta.field == EntityField::SizeColor)
-        {
-          entity.size = std::bit_cast<float>(static_cast<uint32_t>(delta.value >> 32));
-          entity.color = static_cast<uint32_t>(delta.value);
-        }
-      });
+
+    const auto count = bytes.size() / sizeof(Entity);
+    NG_ASSERT(bytes.size() % sizeof(Entity) == 0);
+    newSnapshot.state.resize(count);
+    std::memcpy(newSnapshot.state.data(), bytes.data(), bytes.size());
 
     if (snapshotHistory_.size() > 10)
     {
       snapshotHistory_.pop_front();
     }
-
-    send(server_peer_, 1, {},
-      PSnapshotDeltaAck{ .sequence = packet.sequence });
-  }
-
-  void handlePacket(ENetPeer*, const PSpawnEntity& packet)
-  {
-    state_.entities.emplace_back(packet.entity);
-    snapshotHistory_.back().state.entities.emplace_back(packet.entity);
-  }
-
-  void handlePacket(ENetPeer*, const PDestroyEntity& packet)
-  {
-    auto it = std::find_if(state_.entities.begin(), state_.entities.end(),
-      [&packet](const Entity& e)
-        { return e.id == packet.id; });
-    if (it == state_.entities.end()) {
-      return;
-    }
-    std::swap(*it, state_.entities.back());
-    state_.entities.pop_back();
   }
 
   void begin()
@@ -167,7 +130,6 @@ class ClientService
       send(lobby_peer_, 0, ENET_PACKET_FLAG_RELIABLE,
         PStartLobby{});
     }
-    
   }
 
   void handleLine(std::string_view line)
@@ -264,7 +226,7 @@ class ClientService
   void draw()
   {
     glm::vec2 playerPos{0, 0};
-    for (auto& entity : state_.entities)
+    for (auto& entity : state_)
     {
       if (entity.id == playerEntityId_)
       {
@@ -298,7 +260,7 @@ class ClientService
 
     }
 
-    for (auto& entity : state_.entities)
+    for (auto& entity : state_)
     {
       auto p = worldToScreen(entity.pos);
       al_draw_filled_circle(
@@ -325,7 +287,7 @@ class ClientService
     
     if (snapshotHistory_.size() == 1)
     {
-      return snapshotHistory_.front().state.entities;
+      return snapshotHistory_.front().state;
     }
     else if (snapshotHistory_.size() >= 2)
     {
@@ -333,11 +295,11 @@ class ClientService
       auto& recent = snapshotHistory_[1];
 
       std::vector<Entity> result;
-      result.reserve(recent.state.entities.size());
+      result.reserve(recent.state.size());
 
       zipById(
-        std::span{old.state.entities.data(), old.state.entities.size()},
-        std::span{recent.state.entities.data(), recent.state.entities.size()},
+        std::span{old.state.data(), old.state.size()},
+        std::span{recent.state.data(), recent.state.size()},
         [&result, to = old.time, tr = recent.time, time]
         (const Entity& o, const Entity& r)
         {
@@ -355,7 +317,7 @@ class ClientService
       return result;
     }
 
-    return state_.entities;
+    return state_;
   }
 
   void interpolatePlayer(Clock::time_point now, float delta)
@@ -392,10 +354,10 @@ class ClientService
 
     const auto& snapshot = snapshotHistory_.back();
 
-    auto it = std::find_if(snapshot.state.entities.begin(), snapshot.state.entities.end(),
+    auto it = std::find_if(snapshot.state.begin(), snapshot.state.end(),
       [this](const Entity& e) { return e.id == playerEntityId_; });
 
-    if (it == snapshot.state.entities.end()) {
+    if (it == snapshot.state.end()) {
       return;
     }
 
@@ -441,20 +403,17 @@ class ClientService
         constexpr auto forcedLagMs = 250ms;
         auto time = now - forcedLagMs;
 
-        auto interpolated = interpolate(time);
+        std::optional<Entity> playerBackup;
+        if (auto player = entityById(playerEntityId_)) playerBackup = *player;
 
-        zipById(
-          std::span{state_.entities.data(), state_.entities.size()},
-          std::span{interpolated.data(), interpolated.size()},
-          [this](Entity& e, Entity& interp)
-          {
-            e.size = interp.size;
-            e.color = interp.color;
-            if (e.id == playerEntityId_) {
-              return;
-            }
-            e.pos = interp.pos;
-          });
+        state_ = interpolate(time);
+        
+        if (auto player = entityById(playerEntityId_); player && playerBackup)
+        {
+            // keep local simulation position
+            player->pos = playerBackup->pos;
+        }
+        
 
         interpolatePlayer(now, delta);
       }
@@ -468,9 +427,8 @@ class ClientService
           || glm::length(playerVelHistory_[sz - 1].vel - playerVelHistory_[sz - 2].vel) > 1e-3)
         {
           lastSendTime = now;
-          send(server_peer_, 1, {}, PPlayerInput{
-              .desiredSpeed = glm::packSnorm2x16(playerDesiredSpeed_)
-            });
+          auto packed = glm::packSnorm2x16(playerDesiredSpeed_);
+          replicate(server_peer_, 1, {reinterpret_cast<std::byte*>(&packed), sizeof(packed)});
         }
       }
     }
@@ -510,7 +468,7 @@ int main(int argc, char** argv)
   NG_VERIFY(enet_initialize() == 0);
   std::atexit(enet_deinitialize);
 
-  ClientService client;
+  Client client;
 
   client.joinLobby(argv[1], static_cast<enet_uint16>(std::atoi(argv[2])));
 

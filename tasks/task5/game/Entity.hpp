@@ -26,17 +26,13 @@ struct Entity
   static glm::vec2 randomPos();
 };
 
-struct GameState
-{
-  uint64_t sequence;
-  std::vector<Entity> entities;
-};
+using GameState = std::vector<Entity>;
 
 template<class T>
 concept HasId = requires(T t) { { t.id } -> std::convertible_to<id_t>; };
 
 template<HasId T, HasId U, std::invocable<T&, U&> F>
-void zipById(std::span<T> first, std::span<U> second, F f)
+std::tuple<size_t, size_t> zipById(std::span<T> first, std::span<U> second, F f)
 {
   auto comp = [](const auto& fst, const auto& snd) { return fst.id < snd.id; };
 
@@ -61,4 +57,5 @@ void zipById(std::span<T> first, std::span<U> second, F f)
     f(first[i], second[j]);
     ++j;
   }
+  return {i, j};
 }

@@ -23,7 +23,7 @@ class LobbyService
     
   }
 
-  void handlePacket(ENetPeer*, const PStartLobby&)
+  void handlePacket(ENetPeer*, enet_uint8, const PStartLobby&)
   {
     if (servers_.empty())
     {
@@ -46,14 +46,14 @@ class LobbyService
 
   }
 
-  void handlePacket(ENetPeer* client, const PRegisterClientInLobby&)
+  void handlePacket(ENetPeer* client, enet_uint8, const PRegisterClientInLobby&)
   {
     spdlog::info("Client {}:{} registered", client->address.host, client->address.port);
     clients_.emplace(client);
   }
 
 
-  void handlePacket(ENetPeer* server, const PRegisterServerInLobby&)
+  void handlePacket(ENetPeer* server, enet_uint8, const PRegisterServerInLobby&)
   {
     spdlog::info("Server {}:{} registered", server->address.host, server->address.port);
     servers_.push_back(server->address);

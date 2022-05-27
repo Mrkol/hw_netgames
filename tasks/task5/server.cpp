@@ -5,6 +5,7 @@
 
 #include "common/assert.hpp"
 #include "common/Service.hpp"
+#include "common/Replication.hpp"
 #include "common/AsyncInput.hpp"
 #include "common/proto.hpp"
 
@@ -15,12 +16,13 @@
 using namespace std::chrono_literals;
 
 
-class ServerService
-  : public Service<ServerService, true>
+class Server
+  : public Service<Server, true>
+  , public Replication<Server>
 {
   using Clock = std::chrono::steady_clock;
  public:
-  ServerService(ENetAddress addr)
+  Server(ENetAddress addr)
     : Service(&addr, 32, 2)
   {
     resetGame();
@@ -30,17 +32,15 @@ class ServerService
   {
     constexpr size_t kBots = 10;
 
-    stateHistory_.clear();
+    state_.clear();
     botTargets_.clear();
 
-    auto& initial = stateHistory_.emplace_back();
-    initial.sequence = 0;
-    initial.entities.reserve(kBots);
+    state_.reserve(kBots);
     botTargets_.reserve(kBots);
     for (size_t i = 0; i < kBots; ++i)
     {
       auto entity = Entity::create();
-      auto id = initial.entities.emplace_back(entity).id;
+      auto id = state_.emplace_back(entity).id;
       botTargets_.emplace(id, Entity::randomPos());
     }
   }
@@ -65,7 +65,9 @@ class ServerService
       });
   }
 
-  void handlePacket(ENetPeer* peer, PChat packet)
+  using Replication::handlePacket;
+
+  void handlePacket(ENetPeer* peer, enet_uint8, PChat packet)
   {
     packet.player = clients_.at(peer).id;
     for (auto&[client, data] : clients_)
@@ -85,18 +87,16 @@ class ServerService
     });
 
     setKeyFor(peer, TOP_SECRET_KEY);
+    setupReplication(peer, 1);
 
     auto id = idCounter_++;
 
-    auto& newState = stateHistory_.emplace_front(stateHistory_.front());
 
-
-    auto& playerEntity = newState.entities.emplace_back(Entity::create());
+    auto& playerEntity = state_.emplace_back(Entity::create());
 
     clients_.emplace(peer, ClientData{
         .id = id,
         .entityId = playerEntity.id,
-        .lastSequenceAck = ++newState.sequence,
       });
 
     send(peer, 0, ENET_PACKET_FLAG_RELIABLE,
@@ -104,8 +104,6 @@ class ServerService
         .id = playerEntity.id,
       });
 
-    send(peer, 0, ENET_PACKET_FLAG_RELIABLE, PSnapshot{},
-      std::span(newState.entities.data(), newState.entities.size()));
 
     for (auto&[client, data] : clients_)
     {
@@ -114,16 +112,16 @@ class ServerService
       send(client, 0, ENET_PACKET_FLAG_RELIABLE,
         PPlayerJoined{ .id =  id });
 
-      send(client, 0, ENET_PACKET_FLAG_RELIABLE, PSpawnEntity{ .entity = playerEntity });
-      
       send(peer, 0, ENET_PACKET_FLAG_RELIABLE,
         PPlayerJoined{ .id = data.id });
     }
+
+    broadcastDeltas();
   }
 
   Entity* entityById(id_t id)
   {
-    auto& entities = stateHistory_.front().entities;
+    auto& entities = state_;
     auto it = std::find_if(entities.begin(), entities.end(),
       [id](const Entity& e) { return e.id == id; });
     if (it == entities.end())
@@ -132,8 +130,10 @@ class ServerService
     return &*it;
   }
 
-  void handlePacket(ENetPeer* peer, const PPlayerInput& packet)
+  void handleReplication(ENetPeer* peer, enet_uint8, std::span<const std::byte> bytes)
   {
+    NG_ASSERT(bytes.size() == sizeof(glm::uint));
+
     auto it = clients_.find(peer);
     if (it == clients_.end()) return;
 
@@ -141,7 +141,7 @@ class ServerService
 
     if (entity == nullptr) return;
 
-    auto desiredSpeed = glm::unpackSnorm2x16(packet.desiredSpeed);
+    auto desiredSpeed = glm::unpackSnorm2x16(*reinterpret_cast<const glm::uint*>(bytes.data()));
 
     float len = glm::length(desiredSpeed);
     
@@ -154,25 +154,6 @@ class ServerService
     entity->vel = desiredSpeed / len * std::clamp(len, 0.f, 1.f);
   }
 
-  void handlePacket(ENetPeer* peer, const PSnapshotDeltaAck& packet)
-  {
-    uint64_t minAck = packet.sequence;
-    for (auto[p, data] : clients_)
-    {
-      if (p == peer)
-      {
-        data.lastSequenceAck = packet.sequence;
-      }
-
-      minAck = std::min(minAck, data.lastSequenceAck);
-    }
-
-    while (stateHistory_.size() > 2 && stateHistory_.back().sequence < minAck)
-    {
-      stateHistory_.pop_back();
-    }
-  }
-
   void disconnected(ENetPeer* peer)
   {
     spdlog::info("{}:{} left", peer->address.host, peer->address.port);
@@ -183,8 +164,9 @@ class ServerService
       return;
     }
 
-    auto erasedData = std::move(it->second);
+    ClientData erasedData = std::move(it->second);
     clients_.erase(it);
+    stopReplication(peer, 1);
 
     for (auto&[client, data] : clients_)
     {
@@ -202,10 +184,9 @@ class ServerService
 
   void updateLogic(float delta)
   {
-    auto& newState = stateHistory_.emplace_front(stateHistory_.front());
-    ++newState.sequence;
+    auto& entities = state_;
 
-    for (auto& entity : newState.entities)
+    for (auto& entity : entities)
     {
       if (botTargets_.contains(entity.id))
       {
@@ -224,9 +205,9 @@ class ServerService
       entity.simulate(delta);
     }
 
-    for (auto& e1 : newState.entities)
+    for (auto& e1 : entities)
     {
-      for (auto& e2 : newState.entities)
+      for (auto& e2 : entities)
       {
         if (&e1 == &e2) continue;
 
@@ -240,18 +221,12 @@ class ServerService
       }
     }
 
-    for (size_t i = 0; i < newState.entities.size();)
+    for (size_t i = 0; i < entities.size();)
     {
-      if (newState.entities[i].size < 1e-3)
+      if (entities[i].size < 1e-3)
       {
-        auto id = newState.entities[i].id;
-        std::swap(newState.entities[i], newState.entities.back());
-        newState.entities.pop_back();
-
-        for (auto&[peer, _] : clients_)
-        {
-          send(peer, 0, ENET_PACKET_FLAG_RELIABLE, PDestroyEntity{ .id = id });
-        }
+        std::swap(entities[i], entities.back());
+        entities.pop_back();
       }
       else
       {
@@ -260,59 +235,16 @@ class ServerService
     }
   }
 
-  auto& stateBySequence(uint64_t s)
-  {
-    auto it = stateHistory_.rbegin();
-    while (it->sequence < s) { ++it; }
-    return *it;
-  }
-
   void broadcastDeltas()
   {
-    if (stateHistory_.empty()) {
-      return;
-    }
+    if (clients_.empty()) return;
 
-    const auto currentSequence = stateHistory_.front().sequence;
-    auto& newEntities = stateHistory_.front().entities;
+    std::vector<std::byte> state(state_.size()*sizeof(Entity));
+    std::memcpy(state.data(), state_.data(), state.size());
 
-    std::vector<EntityDelta> deltas;
-    deltas.reserve(newEntities.size());
     for (auto&[to, clientData] : clients_)
     {
-      deltas.clear();
-      auto& oldEntities = stateBySequence(clientData.lastSequenceAck).entities;
-      
-      zipById(
-        // Dear Clang, f'ck you.
-        std::span(newEntities.data(), newEntities.size()),
-        std::span(oldEntities.data(), oldEntities.size()),
-        [&deltas](const Entity& n, const Entity o)
-        {
-          if (glm::length(n.pos - o.pos) > 1e-3)
-          {
-            deltas.emplace_back(
-              EntityDelta {
-                .id = n.id,
-                .field = EntityField::Pos,
-                .value = std::bit_cast<uint64_t>(n.pos),
-              });
-          }
-          
-          if (glm::abs(n.size - o.size) > 1e-3 || n.color != o.color)
-          {
-            deltas.emplace_back(
-              EntityDelta {
-                .id = n.id,
-                .field = EntityField::SizeColor,
-                .value = static_cast<uint64_t>(std::bit_cast<uint32_t>(n.size)) << 32
-                  | static_cast<uint64_t>(n.color),
-              });
-          }
-        });
-
-      send(to, 1, {}, PSnapshotDelta{ .sequence = currentSequence },
-        std::span(deltas.data(), deltas.size()));
+      replicate(to, 1, {state.data(), state.size()});
     }
   }
 
@@ -348,8 +280,7 @@ class ServerService
   }
 
  private:
-  // front is latest
-  std::deque<GameState> stateHistory_;
+  GameState state_;
 
   std::unordered_map<id_t, glm::vec2> botTargets_;
 
@@ -358,7 +289,6 @@ class ServerService
   {
     uint32_t id;
     id_t entityId;
-    uint64_t lastSequenceAck;
   };
 
   std::unordered_map<ENetPeer*, ClientData> clients_;
@@ -383,7 +313,7 @@ int main(int argc, char** argv)
     .port = static_cast<uint16_t>(std::atoi(argv[1])),
   };
 
-  ServerService server(address);
+  Server server(address);
 
   server.registerInLobby(argv[2], static_cast<uint16_t>(std::atoi(argv[3])));
 

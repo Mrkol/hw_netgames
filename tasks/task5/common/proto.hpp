@@ -19,16 +19,10 @@ enum class PacketType : uint8_t
   PlayerLeft,
   Chat,
 
-  SnapshotDelta,
-  Snapshot,
-  SnapshotDeltaAck,
+  Replication,
+  ReplicationAck,
   
-  SpawnEntity,
-  DestroyEntity,
   PossesEntity,
-  PlayerInput,
-  EntityPropsChanged,
-  EntityTeleport,
   COUNT,
 };
 
@@ -46,6 +40,19 @@ using P##Name = Packet<PacketType::Name>;\
 template<>\
 struct Packet<PacketType::Name> : PacketBase<PacketType::Name>
 
+
+
+PROTO_IMPL_PACKET(Replication)
+{
+  using Continuation = std::byte;
+
+  uint64_t sequence;
+};
+
+PROTO_IMPL_PACKET(ReplicationAck)
+{
+  uint64_t sequence;
+};
 
 PROTO_IMPL_PACKET(StartLobby) {};
 
