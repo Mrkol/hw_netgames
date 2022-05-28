@@ -26,11 +26,7 @@ struct Entity
   static glm::vec2 randomPos();
 };
 
-struct GameState
-{
-  uint64_t sequence;
-  std::vector<Entity> entities;
-};
+using GameState = std::vector<Entity>;
 
 template<class T>
 concept HasId = requires(T t) { { t.id } -> std::convertible_to<id_t>; };

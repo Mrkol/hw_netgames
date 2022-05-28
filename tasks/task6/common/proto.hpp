@@ -25,17 +25,11 @@ enum class PacketType : uint8_t
   PlayerJoined,
   PlayerLeft,
   Chat,
-
-  SnapshotDelta,
-  Snapshot,
-  SnapshotDeltaAck,
   
-  SpawnEntity,
-  DestroyEntity,
+  Replication,
+  ReplicationAck,
+  
   PossesEntity,
-  PlayerInput,
-  EntityPropsChanged,
-  EntityTeleport,
   COUNT,
 };
 
@@ -96,6 +90,18 @@ PROTO_IMPL_PACKET(PlayerJoined)
 PROTO_IMPL_PACKET(PlayerLeft)
 {
   uint32_t id;
+};
+
+PROTO_IMPL_PACKET(Replication)
+{
+  using Continuation = std::byte;
+
+  uint64_t sequence;
+};
+
+PROTO_IMPL_PACKET(ReplicationAck)
+{
+  uint64_t sequence;
 };
 
 PROTO_IMPL_PACKET(Chat)

@@ -85,7 +85,7 @@ class LobbyService
     }
   }
 
-  void handlePacket(ENetPeer* peer, const PCreateLobby& packet)
+  void handlePacket(ENetPeer* peer, enet_uint8, const PCreateLobby& packet)
   {
     removeFromLobby(peer);
 
@@ -102,7 +102,7 @@ class LobbyService
     broadcastLobbies();
   }
 
-  void handlePacket(ENetPeer* peer, const PJoinLobby& packet)
+  void handlePacket(ENetPeer* peer, enet_uint8, const PJoinLobby& packet)
   {
     auto it = lobbies_.find(packet.id);
     if (it == lobbies_.end()) return;
@@ -125,7 +125,7 @@ class LobbyService
     broadcastLobbies();
   }
 
-  void handlePacket(ENetPeer* peer, const PLeaveLobby& packet)
+  void handlePacket(ENetPeer* peer, enet_uint8, const PLeaveLobby& packet)
   {
     auto it = lobbies_.find(packet.id);
     if (it == lobbies_.end()) return;
@@ -135,7 +135,7 @@ class LobbyService
     broadcastLobbies();
   }
 
-  void handlePacket(ENetPeer*, const PStartLobby& packet)
+  void handlePacket(ENetPeer*, enet_uint8, const PStartLobby& packet)
   {
     if (servers_.empty())
     {
@@ -172,7 +172,7 @@ class LobbyService
     }
   }
 
-  void handlePacket(ENetPeer* client, const PRegisterClientInLobby&)
+  void handlePacket(ENetPeer* client, enet_uint8, const PRegisterClientInLobby&)
   {
     spdlog::info("Client {}:{} registered", client->address.host, client->address.port);
     clients_.emplace(client);
@@ -183,7 +183,7 @@ class LobbyService
       PLobbyListUpdate{}, std::span{lobbies.data(), lobbies.size()});
   }
 
-  void handlePacket(ENetPeer* server, const PRegisterServerInLobby&)
+  void handlePacket(ENetPeer* server, enet_uint8, const PRegisterServerInLobby&)
   {
     spdlog::info("Server {}:{} registered", server->address.host, server->address.port);
     servers_.push_back(server);

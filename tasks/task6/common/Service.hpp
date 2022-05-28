@@ -67,22 +67,6 @@ class Service
     peer_send(peer, channel, enetpacket);
   }
 
-  template<PacketType t>
-  void handlePacket(ENetPeer* peer, const Packet<t>&)
-  {
-    spdlog::error("Unsupported packet {} received from {}:{}", t, peer->address.host, peer->address.port);
-  }
-
-  void connected(ENetPeer* peer)
-  {
-    spdlog::info("Connection established with {}:{}", peer->address.host, peer->address.port);
-  }
-
-  void disconnected(ENetPeer* peer)
-  {
-    spdlog::info("Disconnected from {}:{}", peer->address.host, peer->address.port);
-  }
-
   void poll(uint32_t timeoutMs = 30)
   {
     ENetEvent event;
@@ -104,7 +88,7 @@ class Service
           break;
 
         case ENET_EVENT_TYPE_DISCONNECT:
-          keys.erase(event.peer);
+          keys_.erase(event.peer);
           if (auto it = pending_disconnect_.find(event.peer);
             it != pending_disconnect_.end())
           {
@@ -128,7 +112,7 @@ class Service
             NG_VERIFY(static_cast<int>(type) < static_cast<int>(PacketType::COUNT));
             
             auto procPacketType =
-              [type, peer, data, size = event.packet->dataLength, this]
+              [type, peer, data, size = event.packet->dataLength, chan = event.channelID, this]
               <PacketType t>()
               {
                 if (type == t)
@@ -142,26 +126,26 @@ class Service
                         reinterpret_cast<PacketCont*>(data + sizeof(Packet<t>)),
                         (size - sizeof(Packet<t>))/sizeof(PacketCont)
                       };
-                    if constexpr (requires { self().handlePacket(peer, packet, cont); })
+                    if constexpr (requires { self().handlePacket(peer, chan, packet, cont); })
                     {
-                      self().handlePacket(peer, packet, cont);
+                      self().handlePacket(peer, chan, packet, cont);
                     }
                     else
                     {
-                      handlePacket(peer, packet);
+                      spdlog::error("Unsupported packet {} (with continuation) received from {}:{} on channel {}",
+                        t, peer->address.host, peer->address.port, chan);
                     }
                   }
                   else
                   {
-                    // I hoped that it would find the default handlePacket on it's own,
-                    // but two-phase lookup is hard :(
-                    if constexpr (requires { self().handlePacket(peer, packet); })
+                    if constexpr (requires { self().handlePacket(peer, chan, packet); })
                     {
-                      self().handlePacket(peer, packet);
+                      self().handlePacket(peer, chan, packet);
                     }
                     else
                     {
-                      handlePacket(peer, packet);
+                      spdlog::error("Unsupported packet {} received from {}:{} on channel {}",
+                        t, peer->address.host, peer->address.port, chan);
                     }
                   }
 
@@ -184,7 +168,18 @@ class Service
 
   void setKeyFor(ENetPeer* peer, const XorKey& key)
   {
-    keys[peer] = key;
+    keys_[peer] = key;
+  }
+
+private:
+  void connected(ENetPeer* peer)
+  {
+    spdlog::info("Connection established with {}:{}", peer->address.host, peer->address.port);
+  }
+
+  void disconnected(ENetPeer* peer)
+  {
+    spdlog::info("Disconnected from {}:{}", peer->address.host, peer->address.port);
   }
 
  private:
@@ -193,8 +188,8 @@ class Service
 
   void cipher(ENetPeer* peer, ENetPacket* packet) const
   {
-    auto it = keys.find(peer);
-    if (it == keys.end()) return;
+    auto it = keys_.find(peer);
+    if (it == keys_.end()) return;
 
     auto& key = it->second;
 
@@ -214,7 +209,7 @@ class Service
 
  private:
   UniquePtr<ENetHost> host_;
-  std::unordered_map<ENetPeer*, XorKey> keys;
+  std::unordered_map<ENetPeer*, XorKey> keys_;
   std::unordered_map<ENetPeer*, fu2::function<void(ENetPeer*)>> pending_connect_;
   std::unordered_map<ENetPeer*, fu2::function<void()>> pending_disconnect_;
 };
